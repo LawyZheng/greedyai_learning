@@ -164,12 +164,17 @@ def toutiao_spider():
         print("-"*30)
 
     # 写入excel
-    df.to_excel('toutiao.xlsx')
-    df.to_json('toutiao.json')
+    #df.to_excel('toutiao_%04d%02d%02d.xlsx' % (today.year, today.month, today.day))
+    df.to_json('toutiao_%04d%02d%02d.json' % (today.year, today.month, today.day))
 
 
 def create_wordcloud():
-    df = pandas.read_json('toutiao.json')
+    json_list = [f for f in os.listdir('.') if f.endswith('.json')]
+    df_list = list(map(pandas.read_json, json_list))
+
+    df = pandas.concat(df_list, ignore_index=True)
+    df.drop_duplicates('item_id', keep='first', inplace=True)
+
 
     # 获取文章abstract数据
     abstract_list = df.abstract.to_list()
@@ -199,4 +204,4 @@ def create_wordcloud():
 
 if __name__ == '__main__':
     toutiao_spider()
-    create_wordcloud()
+    #create_wordcloud()
