@@ -6,6 +6,7 @@ import datetime
 import pandas
 import re
 import wordcloud
+from sqlalchemy import create_engine
 
 
 def get_browsers():
@@ -111,6 +112,38 @@ def get_article_tags(url, headers, proxies):
     return article_tags
 
 
+def save_to_database(dataframe):
+    #连接数据库
+    engine = create_engine('sqlite:///toutiao_hot.db')
+    #engine = create_engine('sqlite:///test.db')
+    print('数据库连接成功。')
+
+    #取出数据库中原有的数据库
+    df = pandas.read_sql('tb_toutiao_hot', con=engine)
+    print('数据读取成功，正在进行数据清洗整合。')
+
+    #将数据库中的json数据类型转化成python数据类型
+    for col in df.columns:
+        if df[col].dtype == 'object':
+            df[col] = list(map(json.loads, df[col]))
+
+    #拼接新数据，并去重
+    df_new = pandas.concat([df, dataframe], ignore_index=True, sort=False)
+    df_new.drop_duplicates('item_id', keep='first', inplace=True)
+
+    #筛选出新数据
+    df_new = df_new.drop(labels=df.axes[0])
+    print('数据清洗完成，正在进行数据录入。')
+
+    #将新数据转化成json类型
+    for col in df_new.columns:
+        if df_new[col].dtype == 'object':
+            df_new[col] = list(map(json.dumps, df_new[col]))
+
+    df_new.to_sql('tb_toutiao_hot', con=engine, index=False, if_exists='append')
+    print("数据录入成功。")
+
+
 def toutiao_spider():
     visited = set()
     df = pandas.DataFrame()
@@ -153,6 +186,9 @@ def toutiao_spider():
             # 给新闻添加新的article_tags键
             news['article_tags'] = get_article_tags(url, headers, proxies)
 
+            # 给新闻添加被抓取的时间戳
+            news['spider_time'] = time_stamp
+
             # 更新dataframe
             df = df.append(news, ignore_index=True)
 
@@ -163,18 +199,21 @@ def toutiao_spider():
         print("已完成进度: %.2f" % finished)
         print("-"*30)
 
-    # 写入excel
+    # 写入数据库
     #df.to_excel('toutiao_%04d%02d%02d.xlsx' % (today.year, today.month, today.day))
+    print('爬取完成，准备录入数据库。')
+    save_to_database(df)
     df.to_json('toutiao_%04d%02d%02d.json' % (today.year, today.month, today.day))
 
 
 def create_wordcloud():
-    json_list = [f for f in os.listdir('.') if f.endswith('.json')]
-    df_list = list(map(pandas.read_json, json_list))
+    engine = create_engine('sqlite:///toutiao_hot.db')
+    df = pandas.read_sql('tb_toutiao_hot', con=engine)
 
-    df = pandas.concat(df_list, ignore_index=True)
-    df.drop_duplicates('item_id', keep='first', inplace=True)
-
+    #将json数据转化成Python数据
+    for col in df.columns:
+        if df[col].dtype == 'object':
+            df[col] = list(map(json.loads, df[col]))
 
     # 获取文章abstract数据
     abstract_list = df.abstract.to_list()
@@ -203,5 +242,5 @@ def create_wordcloud():
 
 
 if __name__ == '__main__':
-    toutiao_spider()
-    #create_wordcloud()
+    #toutiao_spider()
+    create_wordcloud()
