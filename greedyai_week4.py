@@ -203,7 +203,7 @@ def toutiao_spider():
             news['article_tags'] = get_article_tags(url, headers, proxies)
 
             # 给新闻添加被抓取的时间戳
-            # 避免在dataframe中转化成float类型, 格式化成datatime类型
+            # append方法会将int类型转化成float类型, 所以格式化成datatime类型
             spider_time = datetime.datetime.fromtimestamp(time_stamp)
             news['spider_time'] = spider_time
 
