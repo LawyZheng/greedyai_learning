@@ -7,6 +7,7 @@ import pandas
 import re
 import wordcloud
 from sqlalchemy import create_engine
+import sys
 
 
 def get_browsers():
@@ -63,7 +64,7 @@ def get_news_json(headers, proxies, time_stamp):
     resp = requests.get(url, headers=headers, params=params)
     resp.encoding = 'unicode_escape'
 
-    # 有时候需要用utf-8编码
+    #有时候需要用utf-8编码
     try:
         resp_json = json.loads(resp.text)
     except json.decoder.JSONDecodeError:
@@ -71,6 +72,14 @@ def get_news_json(headers, proxies, time_stamp):
         resp_json = json.loads(resp.text)
 
     news_list = resp_json['data']
+
+    # try:
+    #     resp_json = resp.json()
+    #     news_list = resp_json['data']
+    # except:
+    #     print(resp.url)
+    #     print(resp_json)
+    #     sys.exit(0)
 
     # 如果获取新闻json数据失败，进行递归调用
     if not news_list:
@@ -166,7 +175,11 @@ def toutiao_spider():
         headers, proxies = set_headers_proxies(browsers)
 
         print("正在爬取数据。")
-        news_list = get_news_json(headers, proxies, time_stamp)
+        #如果递归了很多次依旧没有找到数据，就跳过
+        try:
+            news_list = get_news_json(headers, proxies, time_stamp)
+        except RecursionError:
+            continue
 
         for news in news_list:
             # 如果已经访问过该新闻数据，则跳过
@@ -174,6 +187,9 @@ def toutiao_spider():
                 continue
             # 偶尔会出现gallery之类只显示图片的网页数据。如果该内容不是文章，跳过
             if news['article_genre'] != 'article':
+                continue
+            #如果出现没有摘要的文章，一般都是图片，也跳过
+            if not news['abstract']:
                 continue
 
             # 添加到已访问
@@ -187,7 +203,9 @@ def toutiao_spider():
             news['article_tags'] = get_article_tags(url, headers, proxies)
 
             # 给新闻添加被抓取的时间戳
-            news['spider_time'] = time_stamp
+            # 避免在dataframe中转化成float类型, 格式化成datatime类型
+            spider_time = datetime.datetime.fromtimestamp(time_stamp)
+            news['spider_time'] = spider_time
 
             # 更新dataframe
             df = df.append(news, ignore_index=True)
@@ -242,5 +260,5 @@ def create_wordcloud():
 
 
 if __name__ == '__main__':
-    #toutiao_spider()
-    create_wordcloud()
+    toutiao_spider()
+    #create_wordcloud()
