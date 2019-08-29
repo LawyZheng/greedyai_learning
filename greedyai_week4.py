@@ -7,7 +7,6 @@ import pandas
 import re
 import wordcloud
 from sqlalchemy import create_engine
-import sys
 
 
 def get_browsers():
@@ -73,14 +72,6 @@ def get_news_json(headers, proxies, time_stamp):
 
     news_list = resp_json['data']
 
-    # try:
-    #     resp_json = resp.json()
-    #     news_list = resp_json['data']
-    # except:
-    #     print(resp.url)
-    #     print(resp_json)
-    #     sys.exit(0)
-
     # 如果获取新闻json数据失败，进行递归调用
     if not news_list:
         news_list = get_news_json(headers, proxies, time_stamp)
@@ -128,7 +119,7 @@ def save_to_database(dataframe):
     print('数据库连接成功。')
 
     #取出数据库中原有的数据库
-    df = pandas.read_sql('tb_toutiao_hot', con=engine)
+    df = pandas.read_sql('tb_toutiao_hot', con=engine, index_col='index')
     print('数据读取成功，正在进行数据清洗整合。')
 
     #将数据库中的json数据类型转化成python数据类型
@@ -139,17 +130,14 @@ def save_to_database(dataframe):
     #拼接新数据，并去重
     df_new = pandas.concat([df, dataframe], ignore_index=True, sort=False)
     df_new.drop_duplicates('item_id', keep='first', inplace=True)
-
-    #筛选出新数据
-    df_new = df_new.drop(labels=df.axes[0])
-    print('数据清洗完成，正在进行数据录入。')
+    print('数据清洗整合完成，正在进行数据录入。')
 
     #将新数据转化成json类型
     for col in df_new.columns:
         if df_new[col].dtype == 'object':
             df_new[col] = list(map(json.dumps, df_new[col]))
 
-    df_new.to_sql('tb_toutiao_hot', con=engine, index=False, if_exists='append')
+    df_new.to_sql('tb_toutiao_hot', con=engine, if_exists='replace')
     print("数据录入成功。")
 
 
@@ -179,7 +167,7 @@ def toutiao_spider():
         try:
             news_list = get_news_json(headers, proxies, time_stamp)
         except RecursionError:
-            continue
+            pass
 
         for news in news_list:
             # 如果已经访问过该新闻数据，则跳过
@@ -200,7 +188,10 @@ def toutiao_spider():
             url = "https://www.toutiao.com" + news['source_url']
 
             # 给新闻添加新的article_tags键
-            news['article_tags'] = get_article_tags(url, headers, proxies)
+            try:
+                news['article_tags'] = get_article_tags(url, headers, proxies)
+            except:
+                news['article_tags'] = list()
 
             # 给新闻添加被抓取的时间戳
             # append方法会将int类型转化成float类型, 所以格式化成datatime类型
@@ -212,10 +203,13 @@ def toutiao_spider():
 
         print("数据爬取成功。")
         print("已有数据%d条。" % len(visited))
-        finished = (time_stamp - yesterday_start_time) / \
+        finished = ((time_stamp - yesterday_start_time) + 1800) / \
             (today_start_time - yesterday_start_time) * 100
-        print("已完成进度: %.2f" % finished)
+        print("已完成进度: %.2f %%。" % finished)
         print("-"*30)
+
+    #将behot_time转化成datetime格式
+    df.behot_time = pandas.to_datetime(df.behot_time, unit='s')
 
     # 写入数据库
     #df.to_excel('toutiao_%04d%02d%02d.xlsx' % (today.year, today.month, today.day))
@@ -226,7 +220,7 @@ def toutiao_spider():
 
 def create_wordcloud():
     engine = create_engine('sqlite:///toutiao_hot.db')
-    df = pandas.read_sql('tb_toutiao_hot', con=engine)
+    df = pandas.read_sql('tb_toutiao_hot', con=engine, index_col='index')
 
     #将json数据转化成Python数据
     for col in df.columns:
