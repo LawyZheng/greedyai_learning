@@ -160,6 +160,7 @@ def save_to_database(dataframe, logger):
     #拼接新数据，并去重
     df_new = pandas.concat([df, dataframe], ignore_index=True, sort=False)
     df_new.drop_duplicates('item_id', keep='first', inplace=True)
+    logger.info("此次共增加数据 %d 条。" % (len(df_new) - len(df)))
     logger.debug('数据清洗整合完成，正在进行数据录入。')
 
     #将新数据转化成json类型
@@ -189,11 +190,12 @@ def toutiao_spider(logger):
 
     # 爬取每隔半小时的数据
     #yesterday_start_time = today_start_time - 1800
+    logger.info('开始爬取数据。')
     for time_stamp in range(yesterday_start_time, today_start_time, 1800):
         #设置headers, proxies参数
         headers, proxies = set_headers_proxies(browsers)
 
-        logger.info("正在爬取数据。")
+        logger.debug("正在爬取数据。")
         #如果递归了很多次依旧没有找到数据，就跳过
         try:
             news_list = get_news_json(headers, proxies, time_stamp)
@@ -232,7 +234,7 @@ def toutiao_spider(logger):
             # 更新dataframe
             df = df.append(news, ignore_index=True)
 
-        logger.info("数据爬取成功。")
+        logger.debug("数据爬取成功。")
         logger.debug("已有数据%d条。" % len(visited))
         finished = ((time_stamp - yesterday_start_time) + 1800) / \
             (today_start_time - yesterday_start_time) * 100
@@ -252,9 +254,7 @@ def toutiao_spider(logger):
 if __name__ == '__main__':
     logger = set_logger()
     try:
-        logger.info('程序开始。')
         toutiao_spider(logger)
-        logger.info('程序结束。')
     except Exception as e:
         logger.error('发生错误。错误信息如下:', exc_info=True)
 
