@@ -6,7 +6,31 @@ import datetime
 import pandas
 import re
 import wordcloud
+import logging
 from sqlalchemy import create_engine
+
+def set_logger():
+    logger = logging.getLogger(__name__)
+    logger.setLevel(logging.DEBUG)
+
+    #文件输出
+    log_path = '/Users/lawyzheng/Desktop/greedyai_learning/toutiao.log'
+    fh = logging.FileHandler(log_path)
+    fh.setLevel(logging.WARNING)
+
+    #stream输出
+    sh = logging.StreamHandler()
+    sh.setLevel(logging.INFO)
+
+    #设置格式
+    fmt = '%(asctime)s - %(levelname)s - %(message)s'
+    datefmt = '%Y/%m/%d %H:%M:%S'
+    formatter = logging.Formatter(fmt, datefmt)
+
+    logger.addHandler(fh)
+    logger.addHandler(sh)
+
+    return logger
 
 
 def get_browsers():
@@ -112,15 +136,15 @@ def get_article_tags(url, headers, proxies):
     return article_tags
 
 
-def save_to_database(dataframe):
+def save_to_database(dataframe, logger):
     #连接数据库
-    engine = create_engine('sqlite:///toutiao_hot.db')
+    engine = create_engine('sqlite:////Users/lawyzheng/greedyai_learning/toutiao_hot.db')
     #engine = create_engine('sqlite:///test.db')
-    print('数据库连接成功。')
+    logger.debug('数据库连接成功。')
 
     #取出数据库中原有的数据库
     df = pandas.read_sql('tb_toutiao_hot', con=engine, index_col='index')
-    print('数据读取成功，正在进行数据清洗整合。')
+    logger.debug('数据读取成功，正在进行数据清洗整合。')
 
     #将数据库中的json数据类型转化成python数据类型
     for col in df.columns:
@@ -130,7 +154,7 @@ def save_to_database(dataframe):
     #拼接新数据，并去重
     df_new = pandas.concat([df, dataframe], ignore_index=True, sort=False)
     df_new.drop_duplicates('item_id', keep='first', inplace=True)
-    print('数据清洗整合完成，正在进行数据录入。')
+    logger.debug('数据清洗整合完成，正在进行数据录入。')
 
     #将新数据转化成json类型
     for col in df_new.columns:
@@ -138,10 +162,10 @@ def save_to_database(dataframe):
             df_new[col] = list(map(json.dumps, df_new[col]))
 
     df_new.to_sql('tb_toutiao_hot', con=engine, if_exists='replace')
-    print("数据录入成功。")
+    logger.debug("数据录入成功。")
 
 
-def toutiao_spider():
+def toutiao_spider(logger):
     visited = set()
     df = pandas.DataFrame()
 
@@ -162,7 +186,7 @@ def toutiao_spider():
         #设置headers, proxies参数
         headers, proxies = set_headers_proxies(browsers)
 
-        print("正在爬取数据。")
+        logger.debug("正在爬取数据。")
         #如果递归了很多次依旧没有找到数据，就跳过
         try:
             news_list = get_news_json(headers, proxies, time_stamp)
@@ -201,58 +225,28 @@ def toutiao_spider():
             # 更新dataframe
             df = df.append(news, ignore_index=True)
 
-        print("数据爬取成功。")
-        print("已有数据%d条。" % len(visited))
+        logger.debug("数据爬取成功。")
+        logger.debug("已有数据%d条。" % len(visited))
         finished = ((time_stamp - yesterday_start_time) + 1800) / \
             (today_start_time - yesterday_start_time) * 100
-        print("已完成进度: %.2f %%。" % finished)
-        print("-"*30)
+        logger.debug("已完成进度: %.2f %%。" % finished)
+        logger.debug("-"*30)
 
     #将behot_time转化成datetime格式
     df.behot_time = pandas.to_datetime(df.behot_time, unit='s')
 
     # 写入数据库
     #df.to_excel('toutiao_%04d%02d%02d.xlsx' % (today.year, today.month, today.day))
-    print('爬取完成，准备录入数据库。')
-    save_to_database(df)
+    logger.debug('爬取完成，准备录入数据库。')
+    save_to_database(df, logger)
     df.to_json('toutiao_%04d%02d%02d.json' % (today.year, today.month, today.day))
 
 
-def create_wordcloud():
-    engine = create_engine('sqlite:///toutiao_hot.db')
-    df = pandas.read_sql('tb_toutiao_hot', con=engine, index_col='index')
-
-    #将json数据转化成Python数据
-    for col in df.columns:
-        if df[col].dtype == 'object':
-            df[col] = list(map(json.loads, df[col]))
-
-    # 获取文章abstract数据
-    abstract_list = df.abstract.to_list()
-    abstract = "\n".join(abstract_list)
-
-    # 获取文章的tags数据
-    tags_list = df.article_tags.to_list()
-    tags = '\n'.join([' '.join(l) for l in tags_list])
-
-    #清洗数据
-    stopwords = {'人生第一份工作', '胜利退出演艺圈', '我的第一部5G手机',
-                 '广州恒大淘宝足球俱乐部', '跳槽那些事儿', '越投入越精彩', '不完美妈妈', '原汁原味的德系SUV'}
-    wc = wordcloud.WordCloud(font_path='msyh.ttf', stopwords=stopwords)
-
-    wc.generate(abstract + tags)
-    image = wc.to_image()
-    image.show()
-
-    # wc.generate(abstract)
-    # image = wc.to_image()
-    # image.show()
-
-    # wc.generate(tags)
-    # image = wc.to_image()
-    # image.show()
-
-
 if __name__ == '__main__':
-    toutiao_spider()
-    #create_wordcloud()
+    logger = set_logger()
+    try:
+        toutiao_spider(logger)
+    except Exception as e:
+        logger.error('发生错误。错误信息如下:', exc_info=True)
+
+    
