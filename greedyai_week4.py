@@ -14,7 +14,7 @@ def set_logger():
     logger.setLevel(logging.DEBUG)
 
     #文件输出
-    log_path = '/Users/lawyzheng/Desktop/greedyai_learning/toutiao.log'
+    log_path = '/Users/lawyzheng/Library/Logs/toutiao.log'
     fh = logging.FileHandler(log_path)
     fh.setLevel(logging.INFO)
 
