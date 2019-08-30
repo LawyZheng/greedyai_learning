@@ -16,16 +16,19 @@ def set_logger():
     #文件输出
     log_path = '/Users/lawyzheng/Desktop/greedyai_learning/toutiao.log'
     fh = logging.FileHandler(log_path)
-    fh.setLevel(logging.WARNING)
+    fh.setLevel(logging.INFO)
 
     #stream输出
     sh = logging.StreamHandler()
-    sh.setLevel(logging.INFO)
+    sh.setLevel(logging.ERROR)
 
     #设置格式
     fmt = '%(asctime)s - %(levelname)s - %(message)s'
     datefmt = '%Y/%m/%d %H:%M:%S'
     formatter = logging.Formatter(fmt, datefmt)
+
+    fh.setFormatter(formatter)
+    sh.setFormatter(formatter)
 
     logger.addHandler(fh)
     logger.addHandler(sh)
@@ -85,6 +88,9 @@ def get_news_json(headers, proxies, time_stamp):
     }
 
     resp = requests.get(url, headers=headers, params=params)
+    if not resp.text:
+        return []
+
     resp.encoding = 'unicode_escape'
 
     #有时候需要用utf-8编码
@@ -138,7 +144,7 @@ def get_article_tags(url, headers, proxies):
 
 def save_to_database(dataframe, logger):
     #连接数据库
-    engine = create_engine('sqlite:////Users/lawyzheng/greedyai_learning/toutiao_hot.db')
+    engine = create_engine('sqlite:////Users/lawyzheng/Desktop/greedyai_learning/toutiao_hot.db')
     #engine = create_engine('sqlite:///test.db')
     logger.debug('数据库连接成功。')
 
@@ -162,7 +168,7 @@ def save_to_database(dataframe, logger):
             df_new[col] = list(map(json.dumps, df_new[col]))
 
     df_new.to_sql('tb_toutiao_hot', con=engine, if_exists='replace')
-    logger.debug("数据录入成功。")
+    logger.info("数据录入成功。")
 
 
 def toutiao_spider(logger):
@@ -182,11 +188,12 @@ def toutiao_spider(logger):
     browsers = get_browsers()
 
     # 爬取每隔半小时的数据
+    #yesterday_start_time = today_start_time - 1800
     for time_stamp in range(yesterday_start_time, today_start_time, 1800):
         #设置headers, proxies参数
         headers, proxies = set_headers_proxies(browsers)
 
-        logger.debug("正在爬取数据。")
+        logger.info("正在爬取数据。")
         #如果递归了很多次依旧没有找到数据，就跳过
         try:
             news_list = get_news_json(headers, proxies, time_stamp)
@@ -225,7 +232,7 @@ def toutiao_spider(logger):
             # 更新dataframe
             df = df.append(news, ignore_index=True)
 
-        logger.debug("数据爬取成功。")
+        logger.info("数据爬取成功。")
         logger.debug("已有数据%d条。" % len(visited))
         finished = ((time_stamp - yesterday_start_time) + 1800) / \
             (today_start_time - yesterday_start_time) * 100
@@ -237,7 +244,7 @@ def toutiao_spider(logger):
 
     # 写入数据库
     #df.to_excel('toutiao_%04d%02d%02d.xlsx' % (today.year, today.month, today.day))
-    logger.debug('爬取完成，准备录入数据库。')
+    logger.info('爬取完成，准备录入数据库。')
     save_to_database(df, logger)
     df.to_json('toutiao_%04d%02d%02d.json' % (today.year, today.month, today.day))
 
@@ -245,7 +252,9 @@ def toutiao_spider(logger):
 if __name__ == '__main__':
     logger = set_logger()
     try:
+        logger.info('程序开始。')
         toutiao_spider(logger)
+        logger.info('程序结束。')
     except Exception as e:
         logger.error('发生错误。错误信息如下:', exc_info=True)
 
