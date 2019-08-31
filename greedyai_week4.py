@@ -5,24 +5,24 @@ import time
 import datetime
 import pandas
 import re
-import wordcloud
 import logging
 from sqlalchemy import create_engine
+
 
 def set_logger():
     logger = logging.getLogger(__name__)
     logger.setLevel(logging.DEBUG)
 
-    #文件输出
+    # 文件输出
     log_path = '/Users/lawyzheng/Library/Logs/toutiao.log'
     fh = logging.FileHandler(log_path)
     fh.setLevel(logging.INFO)
 
-    #stream输出
+    # stream输出
     sh = logging.StreamHandler()
-    sh.setLevel(logging.ERROR)
+    sh.setLevel(logging.CRITICAL)
 
-    #设置格式
+    # 设置格式
     fmt = '%(asctime)s - %(levelname)s - %(message)s'
     datefmt = '%Y/%m/%d %H:%M:%S'
     formatter = logging.Formatter(fmt, datefmt)
@@ -88,19 +88,11 @@ def get_news_json(headers, proxies, time_stamp):
     }
 
     resp = requests.get(url, headers=headers, params=params)
-    if not resp.text:
-        return []
 
-    resp.encoding = 'unicode_escape'
+    # 有时候需要用utf-8编码
+    resp_json = json.loads(resp.text)
 
-    #有时候需要用utf-8编码
-    try:
-        resp_json = json.loads(resp.text)
-    except json.decoder.JSONDecodeError:
-        resp.encoding = 'utf-8'
-        resp_json = json.loads(resp.text)
-
-    news_list = resp_json['data']
+    news_list = resp_json.get('data')
 
     # 如果获取新闻json数据失败，进行递归调用
     if not news_list:
@@ -137,118 +129,93 @@ def get_article_tags(url, headers, proxies):
     if tags_json:
         tags = json.loads(tags_json[0])
         for tag in tags:
-            article_tags.append(tag['name'])
+            article_tags.append(tag.get('name'))
 
-    return article_tags
+    return ' '.join(article_tags)
 
 
 def save_to_database(dataframe, logger):
-    #连接数据库
-    engine = create_engine('sqlite:////Users/lawyzheng/Desktop/greedyai_learning/toutiao_hot.db')
-    #engine = create_engine('sqlite:///test.db')
+    today = datetime.date.today()
+    # 连接数据库
+    engine = create_engine('sqlite:////Users/lawyzheng/Desktop/Code/spider.db')
     logger.debug('数据库连接成功。')
 
-    #取出数据库中原有的数据库
+    # 取出数据库中原有的数据库
     df = pandas.read_sql('tb_toutiao_hot', con=engine, index_col='index')
     logger.debug('数据读取成功，正在进行数据清洗整合。')
 
-    #将数据库中的json数据类型转化成python数据类型
-    for col in df.columns:
-        if df[col].dtype == 'object':
-            df[col] = list(map(json.loads, df[col]))
-
-    #拼接新数据，并去重
+    # 拼接新数据，并去重
     df_new = pandas.concat([df, dataframe], ignore_index=True, sort=False)
     df_new.drop_duplicates('item_id', keep='first', inplace=True)
     logger.info("此次共增加数据 %d 条。" % (len(df_new) - len(df)))
     logger.debug('数据清洗整合完成，正在进行数据录入。')
 
-    #将新数据转化成json类型
-    for col in df_new.columns:
-        if df_new[col].dtype == 'object':
-            df_new[col] = list(map(json.dumps, df_new[col]))
-
+    # 保存到数据库，另外备份一份excel备用
     df_new.to_sql('tb_toutiao_hot', con=engine, if_exists='replace')
+    df_new.to_excel('toutiao_%04d%02d%02d.xlsx' % (today.year, today.month, today.day))
     logger.info("数据录入成功。")
 
 
 def toutiao_spider(logger):
     visited = set()
     df = pandas.DataFrame()
-
-    # 获取昨天和今天的时间
-    today = datetime.date.today()
-    yesterday = today - datetime.timedelta(days=1)
-
-    # 计算时间戳
-    yesterday_start_time = int(time.mktime(
-        time.strptime(str(yesterday), '%Y-%m-%d')))
-    today_start_time = int(time.mktime(time.strptime(str(today), '%Y-%m-%d')))
+    time_stamp = int(time.time())
 
     # 获取headers的user-agent
     browsers = get_browsers()
 
-    # 爬取每隔半小时的数据
-    #yesterday_start_time = today_start_time - 1800
     logger.info('开始爬取数据。')
-    for time_stamp in range(yesterday_start_time, today_start_time, 1800):
-        #设置headers, proxies参数
+
+    # 设置headers, proxies参数
+    headers, proxies = set_headers_proxies(browsers)
+
+    logger.debug("正在爬取数据。")
+    # 如果递归了很多次依旧没有找到数据，就跳过
+    try:
+        news_list = get_news_json(headers, proxies, time_stamp)
+    except RecursionError:
+        pass
+
+    for news in news_list:
+        # 如果已经访问过该新闻数据，则跳过
+        if news.get('item_id') in visited:
+            continue
+        # 偶尔会出现gallery之类只显示图片的网页数据。如果该内容不是文章，跳过
+        if news.get('article_genre') != 'article':
+            continue
+        #如果出现没有摘要的文章，一般都是图片，也跳过
+        if not news.get('abstract'):
+            continue
+
+        # 添加到已访问
+        visited.add(news.get('item_id'))
+
+        # 重新设置头文件，获取文章的url
         headers, proxies = set_headers_proxies(browsers)
+        url = "https://www.toutiao.com" + news.get('source_url')
 
-        logger.debug("正在爬取数据。")
-        #如果递归了很多次依旧没有找到数据，就跳过
+        # 给新闻添加新的article_tags键
         try:
-            news_list = get_news_json(headers, proxies, time_stamp)
-        except RecursionError:
-            pass
+            news['article_tags'] = get_article_tags(url, headers, proxies)
+        except:
+            news['article_tags'] = ""
 
-        for news in news_list:
-            # 如果已经访问过该新闻数据，则跳过
-            if news['item_id'] in visited:
-                continue
-            # 偶尔会出现gallery之类只显示图片的网页数据。如果该内容不是文章，跳过
-            if news['article_genre'] != 'article':
-                continue
-            #如果出现没有摘要的文章，一般都是图片，也跳过
-            if not news['abstract']:
-                continue
+        # 给新闻添加被抓取的时间戳
+        # append方法会将int类型转化成float类型, 所以格式化成datatime类型
+        spider_time = datetime.datetime.fromtimestamp(time_stamp)
+        news['spider_time'] = spider_time
 
-            # 添加到已访问
-            visited.add(news['item_id'])
-
-            # 重新设置头文件，获取文章的url
-            headers, proxies = set_headers_proxies(browsers)
-            url = "https://www.toutiao.com" + news['source_url']
-
-            # 给新闻添加新的article_tags键
-            try:
-                news['article_tags'] = get_article_tags(url, headers, proxies)
-            except:
-                news['article_tags'] = list()
-
-            # 给新闻添加被抓取的时间戳
-            # append方法会将int类型转化成float类型, 所以格式化成datatime类型
-            spider_time = datetime.datetime.fromtimestamp(time_stamp)
-            news['spider_time'] = spider_time
-
-            # 更新dataframe
-            df = df.append(news, ignore_index=True)
+        # 更新dataframe
+        df = df.append(news, ignore_index=True)
 
         logger.debug("数据爬取成功。")
         logger.debug("已有数据%d条。" % len(visited))
-        finished = ((time_stamp - yesterday_start_time) + 1800) / \
-            (today_start_time - yesterday_start_time) * 100
-        logger.debug("已完成进度: %.2f %%。" % finished)
-        logger.debug("-"*30)
 
-    #将behot_time转化成datetime格式
-    df.behot_time = pandas.to_datetime(df.behot_time, unit='s')
+    df = df[['abstract', 'article_genre', 'article_tags', 'item_id', 'source_url', 'spider_time']]
 
     # 写入数据库
-    #df.to_excel('toutiao_%04d%02d%02d.xlsx' % (today.year, today.month, today.day))
     logger.info('爬取完成，准备录入数据库。')
     save_to_database(df, logger)
-    df.to_json('toutiao_%04d%02d%02d.json' % (today.year, today.month, today.day))
 
 
 if __name__ == '__main__':
@@ -257,5 +224,3 @@ if __name__ == '__main__':
         toutiao_spider(logger)
     except Exception as e:
         logger.error('发生错误。错误信息如下:', exc_info=True)
-
-    
