@@ -152,7 +152,7 @@ def save_to_database(dataframe, logger):
 
     # 保存到数据库，另外备份一份excel备用
     df_new.to_sql('tb_toutiao_hot', con=engine, if_exists='replace')
-    df_new.to_excel('toutiao_%04d%02d%02d.xlsx' % (today.year, today.month, today.day))
+    df_new.to_excel('/Users/lawyzheng/Desktop/Code/toutiao_hot.xlsx')
     logger.info("数据录入成功。")
 
 
