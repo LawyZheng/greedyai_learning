@@ -3,3 +3,4 @@
 !*.txt
 !*.cfg
 !spider.db
+!*.ipynb
